@@ -101,6 +101,28 @@ def is_repo_cloned(repo_name):
     cloned_repos = load_cloned_repos()
     return repo_name in cloned_repos
 
+def get_branch_name():
+    current_branch = subprocess.check_output(['git', 'branch'], text=True)
+    current_branch_name = next(line for line in current_branch.splitlines() if line.startswith('* ')).strip()[2:]
+    return current_branch_name
+
+def get_remote_repo():
+    return subprocess.check_output(['git', 'remote'], text=True).strip()
+
+def attempt_fix_repo():
+    __branchN = get_branch_name()
+    __remoteN = get_remote_repo()
+    proc_rcode = subprocess.call(['git','reset','--hard',__branchN])
+    if proc_rcode != 0:
+        sys.stderr.write(f"Unexpected error occurred while attempting to fix Repository")
+        if exitOnERR:
+            sys.exit()
+    proc_rcode = subprocess.call(['git','reset','--hard',f"{__remoteN}/{__branchN}"])
+    if proc_rcode != 0:
+        sys.stderr.write(f"Unexpected error occurred while attempting to fix Repository")
+        if exitOnERR:
+            sys.exit()
+                    
 def get_starred_repos():
     repos = []
     url = GITHUB_API_URL
@@ -242,6 +264,7 @@ def clone_repo_with_wiki(repo_url, repo_name, language, owner):
             wiki_clone_command = ['git', 'clone', wiki_url, wiki_folder]
             print(f"Executing command: {' '.join(wiki_clone_command)}")
             try:
+                attempt_fix_repo()
                 wiki_process = subprocess.Popen(wiki_clone_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
                 _, wiki_stderr =  wiki_process.communicate()
 
@@ -313,6 +336,7 @@ def clone_repo(repo_url, repo_name, language, owner):
     
     # Execute the git clone command and capture the output
     try:
+        attempt_fix_repo()
         # Start the git clone process using subprocess.Popen to capture real-time output
         process = subprocess.Popen(
             git_command,
