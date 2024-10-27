@@ -173,6 +173,72 @@ def get_starred_repos():
     print(f"\nFinished fetching repositories. Total repositories found: {len(repos)}.")
     return repos
 
+def check_for_wiki(repo_name, headers):
+    # URL for the repository information
+    repo_api_url = f"https://api.github.com/repos/{repo_name}"
+    
+    try:
+        # Request repository data
+        response = requests.get(repo_api_url, headers=headers)
+        
+        if response.status_code == 200:
+            repo_data = response.json()
+            
+            print(f"Repository data for {repo_name}: {json.dumps(repo_data, indent=2)}")
+            
+            # Check if the repository has a wiki enabled
+            if repo_data.get("has_wiki", False):
+                print(f"Wiki is enabled for {repo_name}.")
+                return True
+            else:
+                print(f"No wiki available for {repo_name}.")
+                return False
+        else:
+            print(f"Error fetching repository data: {response.status_code} - {response.text}")
+            return False
+    except Exception as e:
+        print(f"Error occurred while checking for wiki: {e}")
+        return False
+
+def clone_repo_with_wiki(repo_url, repo_name, language, owner):
+    # Set the folder name as "User@RepoName"
+    folder_name = f"{owner}@{repo_name.split('/')[-1]}"
+
+    # Check if the repository has a wiki
+    if check_for_wiki(repo_name, headers):
+        wiki_url = repo_url.replace('.git', '.wiki.git')
+        wiki_folder = f'{folder_name}-Wiki'
+        
+        # Directory for the language, default to "Unknown" if no language specified
+        if not language:
+            language = "Unknown"
+    
+        # Create language directory if it doesn't exist
+        if not os.path.exists(language):
+            print(f"Creating directory: {language}")
+            os.makedirs(f'{original_dir}/{language}')
+    
+        # Change into the language directory
+        print(f"Changing to directory: {language}")
+        os.chdir(f'{original_dir}/{language}')
+        
+        if not os.path.exists(wiki_folder):
+            print(f"Cloning the wiki into {wiki_folder}...")
+
+            # Clone the wiki repo
+            wiki_clone_command = ['git', 'clone', wiki_url, wiki_folder]
+            wiki_process = subprocess.Popen(wiki_clone_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            wiki_stdout, wiki_stderr = wiki_process.communicate()
+
+            if wiki_process.returncode != 0:
+                print(f"Wiki clone is possibly failed: {wiki_stderr}")
+            else:
+                print(f"Wiki successfully cloned into {wiki_folder}")
+        else:
+            print(f"Wiki folder {wiki_folder} already exists, skipping wiki clone.")
+
+    # Normal repository cloning logic here (same as the earlier code)
+
 def clone_repo(repo_url, repo_name, language, owner):
     # Set the folder name as "User@RepoName"
     folder_name = f"{owner}@{repo_name.split('/')[-1]}"
@@ -200,10 +266,11 @@ def clone_repo(repo_url, repo_name, language, owner):
     else:
         if os.path.exists(f'{folder_name}/.git'):
             print(f"Directory {folder_name} is already created earlier and is a Git Repository")
+            
             os.chdir(original_dir) 
             if not is_repo_cloned(folder_name):
                 save_cloned_repo(folder_name)
-            return
+            #return
         else:
             print(f"Directory {folder_name} is already created earlier for some reason")
             os.chdir(original_dir) 
@@ -322,7 +389,7 @@ def clone_repo(repo_url, repo_name, language, owner):
         # Check the size of the shallow clone
         repo_size_command = ['du', '-sh', f'{original_dir}/{language}/{folder_name}']
         size_process = subprocess.Popen(
-            repo_size_command,
+            repo_size_command,	
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True
@@ -342,6 +409,33 @@ def clone_repo(repo_url, repo_name, language, owner):
         sys.stderr.write(f"Unexpected error occurred while cloning {repo_url}: {ex}")
         if exitOnERR:
             sys.exit()
+
+    # Pull latest changes and update submodules
+    print(f"Updating repository {repo_name}...")
+
+    # Git pull with submodules
+    _proc = subprocess.Popen(['git', 'pull', '--recurse-submodules'], stderr=subprocess.PIPE)
+    stderr = _proc.stderr.readline()
+    if stderr:
+        print(stderr)
+
+    # Update submodules recursively
+    _proc = subprocess.Popen(['git', 'submodule', 'update', '--init', '--recursive'], stderr=subprocess.PIPE)
+    stderr = _proc.stderr.readline()
+    if stderr:
+        print(stderr)
+
+    # Fetch all updates and prune stale references
+    _proc = subprocess.Popen(['git', 'fetch', '--all'], stderr=subprocess.PIPE)
+    stderr =  _proc.stderr.readline()
+    if stderr:
+        print(stderr)
+    _proc = subprocess.Popen(['git', 'fetch', '--prune', '--tags'], stderr=subprocess.PIPE)
+    stderr = _proc.stderr.readline()
+    if stderr:
+        print(stderr)
+
+    print(f"Repository {repo_name} updated successfully.\n")            
     
     # Move back to the original directory
     print(f"Returning to the parent directory.")
@@ -378,6 +472,24 @@ def main():
         print(f"  - Owner: {owner}")
 
         clone_repo(repo_url, repo_name, language, owner)
+        clone_repo_with_wiki(repo_url, repo_name, language, owner)
+
+        # Fetch and handle rate limit information
+        remaining = int(response.headers.get('X-RateLimit-Remaining', 0))
+        print(f"Remaining requests: {remaining}")
+
+        # If we're out of requests, wait until the rate limit resets
+        if remaining == 0:
+            # Calculate how long to wait until rate limit resets
+            reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
+            reset_timestamp = datetime.fromtimestamp(reset_time)
+            sleep_duration = (reset_timestamp - datetime.now()).total_seconds()
+            print(f"Rate limit hit! Waiting for {int(sleep_duration)} seconds (until {reset_timestamp})...")
+            time.sleep(sleep_duration)
+        else:
+            # Add a cooldown of 2 .5seconds between calls to prevent hitting rate limits too quickly
+            print("Waiting for half second before the next request...")
+            time.sleep(0.5)
 
     print("\nProcess completed. All repositories have been cloned.")
 
