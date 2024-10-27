@@ -240,13 +240,23 @@ def clone_repo_with_wiki(repo_url, repo_name, language, owner):
 
             # Clone the wiki repo
             wiki_clone_command = ['git', 'clone', wiki_url, wiki_folder]
-            wiki_process = subprocess.Popen(wiki_clone_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-            _, wiki_stderr =  wiki_process.communicate()
+            print(f"Executing command: {' '.join(wiki_clone_command)}")
+            try:
+                wiki_process = subprocess.Popen(wiki_clone_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+                _, wiki_stderr =  wiki_process.communicate()
 
-            if wiki_process.returncode != 0 or wiki_stderr:
-                print(f"Wiki clone is possibly failed (Code {wiki_process.returncode}): {wiki_stderr}")
-            else:
-                print(f"Wiki successfully cloned into {wiki_folder}")
+                if wiki_process.returncode != 0 or wiki_stderr:
+                    print(f"Wiki clone is possibly failed (Code {wiki_process.returncode}): {wiki_stderr}")
+                else:
+                    print(f"Wiki successfully cloned into {wiki_folder}")
+            except subprocess.CalledProcessError as e:
+                sys.stderr.write(f"Error: Subprocess error occurred while cloning Wiki of {repo_url}. Error: {e.stderr} (Exit Code: {e.returncode})")
+                if exitOnERR:
+                    sys.exit()
+            except Exception as ex:
+                sys.stderr.write(f"Unexpected error occurred while cloning Wiki of {repo_url}: {ex}")
+                if exitOnERR:
+                    sys.exit()
         else:
             print(f"Wiki folder {wiki_folder} already exists, skipping wiki clone.")
         # Move back to the original directory
