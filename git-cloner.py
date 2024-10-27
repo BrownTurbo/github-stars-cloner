@@ -184,15 +184,28 @@ def check_for_wiki(repo_name, headers):
         if response.status_code == 200:
             repo_data = response.json()
             
-            print(f"Repository data for {repo_name}: {json.dumps(repo_data, indent=2)}")
-            
-            # Check if the repository has a wiki enabled
-            if repo_data.get("has_wiki", False):
-                print(f"Wiki is enabled for {repo_name}.")
-                return True
+            #print(f"Repository data for {repo_name}: {json.dumps(repo_data, indent=2)}")
+
+            # Fetch and handle rate limit information
+            remaining = int(response.headers.get('X-RateLimit-Remaining', 0))
+            print(f"Remaining requests: {remaining}")
+
+            # If we're out of requests, wait until the rate limit resets
+            if remaining == 0:
+                # Calculate how long to wait until rate limit resets
+                reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
+                reset_timestamp = datetime.fromtimestamp(reset_time)
+                sleep_duration = (reset_timestamp - datetime.now()).total_seconds()
+                print(f"Rate limit hit! Waiting for {int(sleep_duration)} seconds (until {reset_timestamp})...")
+                time.sleep(sleep_duration)
             else:
-                print(f"No wiki available for {repo_name}.")
-                return False
+                # Check if the repository has a wiki enabled
+                if repo_data.get("has_wiki", False):
+                    print(f"Wiki is enabled for {repo_name}.")
+                    return True
+                else:
+                    print(f"No wiki available for {repo_name}.")
+                    return False
         else:
             print(f"Error fetching repository data: {response.status_code} - {response.text}")
             return False
@@ -214,7 +227,7 @@ def clone_repo_with_wiki(repo_url, repo_name, language, owner):
             language = "Unknown"
     
         # Create language directory if it doesn't exist
-        if not os.path.exists(language):
+        if not os.path.exists(f'{original_dir}/{language}'):
             print(f"Creating directory: {language}")
             os.makedirs(f'{original_dir}/{language}')
     
@@ -228,16 +241,17 @@ def clone_repo_with_wiki(repo_url, repo_name, language, owner):
             # Clone the wiki repo
             wiki_clone_command = ['git', 'clone', wiki_url, wiki_folder]
             wiki_process = subprocess.Popen(wiki_clone_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
-            wiki_stdout, wiki_stderr = wiki_process.communicate()
+            _, wiki_stderr =  wiki_process.communicate()
 
-            if wiki_process.returncode != 0:
-                print(f"Wiki clone is possibly failed: {wiki_stderr}")
+            if wiki_process.returncode != 0 or wiki_stderr:
+                print(f"Wiki clone is possibly failed (Code {wiki_process.returncode}): {wiki_stderr}")
             else:
                 print(f"Wiki successfully cloned into {wiki_folder}")
         else:
             print(f"Wiki folder {wiki_folder} already exists, skipping wiki clone.")
-
-    # Normal repository cloning logic here (same as the earlier code)
+        # Move back to the original directory
+        print(f"Returning to the parent directory.")
+        os.chdir(original_dir) 
 
 def clone_repo(repo_url, repo_name, language, owner):
     # Set the folder name as "User@RepoName"
@@ -251,7 +265,7 @@ def clone_repo(repo_url, repo_name, language, owner):
         language = "Unknown"
     
     # Create language directory if it doesn't exist
-    if not os.path.exists(language):
+    if not os.path.exists(f'{original_dir}/{language}'):
         print(f"Creating directory: {language}")
         os.makedirs(f'{original_dir}/{language}')
     
@@ -473,23 +487,6 @@ def main():
 
         clone_repo(repo_url, repo_name, language, owner)
         clone_repo_with_wiki(repo_url, repo_name, language, owner)
-
-        # Fetch and handle rate limit information
-        remaining = int(response.headers.get('X-RateLimit-Remaining', 0))
-        print(f"Remaining requests: {remaining}")
-
-        # If we're out of requests, wait until the rate limit resets
-        if remaining == 0:
-            # Calculate how long to wait until rate limit resets
-            reset_time = int(response.headers.get('X-RateLimit-Reset', 0))
-            reset_timestamp = datetime.fromtimestamp(reset_time)
-            sleep_duration = (reset_timestamp - datetime.now()).total_seconds()
-            print(f"Rate limit hit! Waiting for {int(sleep_duration)} seconds (until {reset_timestamp})...")
-            time.sleep(sleep_duration)
-        else:
-            # Add a cooldown of 2 .5seconds between calls to prevent hitting rate limits too quickly
-            print("Waiting for half second before the next request...")
-            time.sleep(0.5)
 
     print("\nProcess completed. All repositories have been cloned.")
 
