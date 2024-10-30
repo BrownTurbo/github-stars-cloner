@@ -40,9 +40,6 @@ verboseOut = args.verbose or  False
 breakOnERR = args.errbreak or False
 exitOnERR = args.errexit or False
 
-# GitHub API endpoint to get starred repositories
-GITHUB_API_URL = f'https://api.github.com/users/{GITHUB_USERNAME}/starred'
-
 # GitHub API headers for authentication
 headers = {
     'Authorization': f'token {GITHUB_TOKEN}',
@@ -114,18 +111,41 @@ def attempt_fix_repo():
     __remoteN = get_remote_repo()
     proc_rcode = subprocess.call(['git','reset','--hard',__branchN])
     if proc_rcode != 0:
-        sys.stderr.write(f"Unexpected error occurred while attempting to fix Repository")
+        sys.stderr.write(f"Unexpected error occurred while attempting to fix Repository\n")
         if exitOnERR:
             sys.exit()
     proc_rcode = subprocess.call(['git','reset','--hard',f"{__remoteN}/{__branchN}"])
     if proc_rcode != 0:
-        sys.stderr.write(f"Unexpected error occurred while attempting to fix Repository")
+        sys.stderr.write(f"Unexpected error occurred while attempting to fix Repository\n")
         if exitOnERR:
             sys.exit()
-                    
+
+def attempt_update_repo():
+    # Git pull with submodules
+    _proc = subprocess.Popen(['git', 'pull', '--recurse-submodules'], stderr=subprocess.PIPE)
+    stderr = _proc.stderr.readline()
+    if stderr:
+        print(stderr)
+
+    # Update submodules recursively
+    _proc = subprocess.Popen(['git', 'submodule', 'update', '--init', '--recursive'], stderr=subprocess.PIPE)
+    stderr = _proc.stderr.readline()
+    if stderr:
+        print(stderr)
+
+    # Fetch all updates and prune stale references
+    _proc = subprocess.Popen(['git', 'fetch', '--all'], stderr=subprocess.PIPE)
+    stderr =  _proc.stderr.readline()
+    if stderr:
+        print(stderr)
+    _proc = subprocess.Popen(['git', 'fetch', '--prune', '--tags'], stderr=subprocess.PIPE)
+    stderr = _proc.stderr.readline()
+    if stderr:
+        print(stderr)
+
 def get_starred_repos():
     repos = []
-    url = GITHUB_API_URL
+    url = f'https://api.github.com/users/{GITHUB_USERNAME}/starred'
     global NUM_API_PAGES
     print("Starting to fetch starred repositories from GitHub...")
     
@@ -186,7 +206,7 @@ def get_starred_repos():
                     time.sleep(2.5)
             else:
                 sys.stderr.write(f"Error: Failed to fetch repositories (HTTP {response.status_code}).")
-                sys.stderr.write(f"Response content: {response.text}")
+                sys.stderr.write(f"Response content: {response.text}\n")
                 break
         except requests.RequestException as e:
             sys.stderr.write(f"Failed to fetch Repositories list from API: {e}\n")
@@ -264,7 +284,6 @@ def clone_repo_with_wiki(repo_url, repo_name, language, owner):
             wiki_clone_command = ['git', 'clone', wiki_url, wiki_folder]
             print(f"Executing command: {' '.join(wiki_clone_command)}")
             try:
-                attempt_fix_repo()
                 wiki_process = subprocess.Popen(wiki_clone_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
                 _, wiki_stderr =  wiki_process.communicate()
 
@@ -273,15 +292,18 @@ def clone_repo_with_wiki(repo_url, repo_name, language, owner):
                 else:
                     print(f"Wiki successfully cloned into {wiki_folder}")
             except subprocess.CalledProcessError as e:
-                sys.stderr.write(f"Error: Subprocess error occurred while cloning Wiki of {repo_url}. Error: {e.stderr} (Exit Code: {e.returncode})")
+                sys.stderr.write(f"Error: Subprocess error occurred while cloning Wiki of {repo_url}. Error: {e.stderr} (Exit Code: {e.returncode})\n")
                 if exitOnERR:
                     sys.exit()
             except Exception as ex:
-                sys.stderr.write(f"Unexpected error occurred while cloning Wiki of {repo_url}: {ex}")
+                sys.stderr.write(f"Unexpected error occurred while cloning Wiki of {repo_url}: {ex}\n")
                 if exitOnERR:
                     sys.exit()
         else:
-            print(f"Wiki folder {wiki_folder} already exists, skipping wiki clone.")
+            if os.path.exists(f'{folder_name}/.git'):
+                print(f"Wiki Directory {wiki_folder} is already created earlier and is a Git Repository")
+            else:
+                print(f"Wiki Directory {wiki_folder} is already created earlier for some reason")
         # Move back to the original directory
         print(f"Returning to the parent directory.")
         os.chdir(original_dir) 
@@ -336,7 +358,6 @@ def clone_repo(repo_url, repo_name, language, owner):
     
     # Execute the git clone command and capture the output
     try:
-        attempt_fix_repo()
         # Start the git clone process using subprocess.Popen to capture real-time output
         process = subprocess.Popen(
             git_command,
@@ -450,40 +471,20 @@ def clone_repo(repo_url, repo_name, language, owner):
             save_cloned_repo(folder_name)
             print(f"Success: {repo_name} successfully cloned into '{original_dir}/{language}/{folder_name}'")
     except subprocess.CalledProcessError as e:
-        sys.stderr.write(f"Error: Subprocess error occurred while cloning {repo_url}. Error: {e.stderr} (Exit Code: {e.returncode})")
+        sys.stderr.write(f"Error: Subprocess error occurred while cloning {repo_url}. Error: {e.stderr} (Exit Code: {e.returncode})\n")
         if exitOnERR:
             sys.exit()
     except Exception as ex:
-        sys.stderr.write(f"Unexpected error occurred while cloning {repo_url}: {ex}")
+        sys.stderr.write(f"Unexpected error occurred while cloning {repo_url}: {ex}\n")
         if exitOnERR:
             sys.exit()
 
+    print(f"Attempting  to fix any problem on {repo_name}...")
+    attempt_fix_repo()
     # Pull latest changes and update submodules
     print(f"Updating repository {repo_name}...")
-
-    # Git pull with submodules
-    _proc = subprocess.Popen(['git', 'pull', '--recurse-submodules'], stderr=subprocess.PIPE)
-    stderr = _proc.stderr.readline()
-    if stderr:
-        print(stderr)
-
-    # Update submodules recursively
-    _proc = subprocess.Popen(['git', 'submodule', 'update', '--init', '--recursive'], stderr=subprocess.PIPE)
-    stderr = _proc.stderr.readline()
-    if stderr:
-        print(stderr)
-
-    # Fetch all updates and prune stale references
-    _proc = subprocess.Popen(['git', 'fetch', '--all'], stderr=subprocess.PIPE)
-    stderr =  _proc.stderr.readline()
-    if stderr:
-        print(stderr)
-    _proc = subprocess.Popen(['git', 'fetch', '--prune', '--tags'], stderr=subprocess.PIPE)
-    stderr = _proc.stderr.readline()
-    if stderr:
-        print(stderr)
-
-    print(f"Repository {repo_name} updated successfully.\n")            
+    attempt_update_repo()
+    print(f"Repository {repo_name} updated successfully.\n")
     
     # Move back to the original directory
     print(f"Returning to the parent directory.")
@@ -496,7 +497,7 @@ def main():
     starred_repos = get_starred_repos()
     
     if not starred_repos:
-        sys.stderr.write("No repositories found or error fetching data.")
+        sys.stderr.write("No repositories found or error fetching data.\n")
         if exitOnERR:
             sys.exit()
         return
@@ -530,4 +531,4 @@ try:
 except KeyboardInterrupt:
     print('Exiting...')
 except Exception as e:
-    sys.stderr.write(f"Sorry, something went wrong> {e}")
+    sys.stderr.write(f"Sorry, something went wrong> {e}\n")
