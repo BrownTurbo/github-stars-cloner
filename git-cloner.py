@@ -287,8 +287,12 @@ def clone_repo_with_wiki(repo_url, repo_name, language, owner):
                 wiki_process = subprocess.Popen(wiki_clone_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
                 _, wiki_stderr =  wiki_process.communicate()
 
+
                 if wiki_process.returncode != 0 or wiki_stderr:
-                    print(f"Wiki clone is possibly failed (Code {wiki_process.returncode}): {wiki_stderr}")
+                    if wiki_process.returncode == 128:
+                        print(f"Wiki clone is possibly failed (Code {wiki_process.returncode})")
+                    else:
+                        print(f"Wiki clone is possibly failed (Code {wiki_process.returncode}): {wiki_stderr}")
                 else:
                     print(f"Wiki successfully cloned into {wiki_folder}")
             except subprocess.CalledProcessError as e:
@@ -479,12 +483,13 @@ def clone_repo(repo_url, repo_name, language, owner):
         if exitOnERR:
             sys.exit()
 
-    print(f"Attempting  to fix any problem on {repo_name}...")
-    attempt_fix_repo()
-    # Pull latest changes and update submodules
-    print(f"Updating repository {repo_name}...")
-    attempt_update_repo()
-    print(f"Repository {repo_name} updated successfully.\n")
+    if os.path.exists(f'{folder_name}/.git'):
+        print(f"Attempting  to fix any problem on {repo_name}...")
+        attempt_fix_repo()
+        # Pull latest changes and update submodules
+        print(f"Updating repository {repo_name}...")
+        attempt_update_repo()
+        print(f"Repository {repo_name} updated successfully.\n")
     
     # Move back to the original directory
     print(f"Returning to the parent directory.")
