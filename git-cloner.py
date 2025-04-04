@@ -1,5 +1,6 @@
 import os
-import requests
+#import requests
+import httpx
 import subprocess
 import time
 import re
@@ -7,10 +8,13 @@ import sys
 from datetime import datetime
 import json
 import argparse
+import logging
 
 # Detecting Python 3 for version-dependent implementations
 if sys.version_info.major < 3:
     raise Exception("Python's major versions earlier than 3 are not supported!")
+
+logging.basicConfig(level=logging.INFO)
 
 original_dir = os.getcwd()
 
@@ -41,7 +45,8 @@ breakOnERR = args.errbreak or False
 exitOnERR = args.errexit or False
 
 # GitHub API headers for authentication
-headers = {
+GITHUB_TOKEN = GITHUB_TOKEN.strip()
+Reqheaders = {
     'Authorization': f'token {GITHUB_TOKEN}',
     'Accept': 'application/vnd.github.v3+json'
 }
@@ -154,7 +159,8 @@ def get_starred_repos():
         
         try:
             # Request starred repositories
-            response = requests.get(url, headers=headers, timeout=(5, 10))
+            #response = requests.get(url, headers=Reqheaders, timeout=(5, 10))
+            response =  httpx.get(url, headers=Reqheaders, timeout=10)
         
             if response.status_code == 200:
                 repos_on_page = response.json()
@@ -208,10 +214,13 @@ def get_starred_repos():
                 sys.stderr.write(f"Error: Failed to fetch repositories (HTTP {response.status_code}).")
                 sys.stderr.write(f"Response content: {response.text}\n")
                 break
-        except requests.RequestException as e:
+        except httpx.RequestError as e:
+            sys.stderr.write(f"Failed to fetch Repositories list from API: {e}\n")
+        """except requests.RequestException as e:
             sys.stderr.write(f"Failed to fetch Repositories list from API: {e}\n")
         except requests.exceptions.Timeout:
-            print("Timed out...")
+            print("Timed out...")"""
+            
     print(f"\nFinished fetching repositories. Total repositories found: {len(repos)}.")
     return repos
 
@@ -221,7 +230,8 @@ def check_for_wiki(repo_name, headers):
     
     try:
         # Request repository data
-        response = requests.get(repo_api_url, headers=headers)
+        #response = requests.get(repo_api_url, headers=Reqheaders)
+        response =  httpx.get(repo_api_url, headers=headers, timeout=10)
         
         if response.status_code == 200:
             repo_data = response.json()
@@ -260,7 +270,7 @@ def clone_repo_with_wiki(repo_url, repo_name, language, owner):
     folder_name = f"{owner}@{repo_name.split('/')[-1]}"
 
     # Check if the repository has a wiki
-    if check_for_wiki(repo_name, headers):
+    if check_for_wiki(repo_name, Reqheaders):
         wiki_url = repo_url.replace('.git', '.wiki.git')
         wiki_folder = f'{folder_name}-Wiki'
         
@@ -281,7 +291,12 @@ def clone_repo_with_wiki(repo_url, repo_name, language, owner):
             print(f"Cloning the wiki into {wiki_folder}...")
 
             # Clone the wiki repo
-            wiki_clone_command = ['git', 'clone', wiki_url, wiki_folder]
+            wiki_clone_command = ['git', 'clone','--progress', wiki_url, wiki_folder]
+
+            # Add the --depth option if cloning depth is specified
+            if CLONE_DEPTH is not None:
+                wiki_clone_command += ['--depth', str(CLONE_DEPTH)]
+
             print(f"Executing command: {' '.join(wiki_clone_command)}")
             try:
                 wiki_process = subprocess.Popen(wiki_clone_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
@@ -315,8 +330,19 @@ def clone_repo_with_wiki(repo_url, repo_name, language, owner):
 def clone_repo(repo_url, repo_name, language, owner):
     # Set the folder name as "User@RepoName"
     folder_name = f"{owner}@{repo_name.split('/')[-1]}"
-    if is_repo_cloned(folder_name):
-        print(f"{folder_name} is already cloned, skipping.")
+    repo_path = f"{original_dir}/{language}/{folder_name}"
+    if os.path.exists(f'{repo_path}/.git') or is_repo_cloned(folder_name):
+        print(f"{folder_name} is already cloned, proceeding...")
+        try:
+            os.chdir(repo_path)
+            print(f"Attempting to fix any problem on {repo_name}...")
+            attempt_fix_repo()
+            print(f"Updating repository {repo_name}...")
+            attempt_update_repo()
+            print(f"Repository {repo_name} updated successfully.\n")
+        finally:
+            print("Returning to the parent directory.")
+            os.chdir(original_dir)
         return
 
     # Directory for the language, default to "Unknown" if no language specified
@@ -352,7 +378,7 @@ def clone_repo(repo_url, repo_name, language, owner):
     os.chdir(f'{original_dir}/{language}/{folder_name}')
     
     # Prepare the git clone command
-    git_command = ['git', 'clone', repo_url, '.']  # Clone directly into the current directory
+    git_command = ['git', 'clone', '--progress', repo_url, '.']  # Clone directly into the current directory
     
     # Add the --depth option if cloning depth is specified
     if CLONE_DEPTH is not None:
@@ -367,7 +393,7 @@ def clone_repo(repo_url, repo_name, language, owner):
             git_command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            universal_newlines=True,
+            universal_newlines=False,
             bufsize=1,  # Line-buffered
             encoding='utf-8'
         )
@@ -394,11 +420,18 @@ def clone_repo(repo_url, repo_name, language, owner):
         # Real-time printing of the git clone process
         while True:
             output = process.stdout.readline()
+            if isinstance(output, bytes):
+                line = output.decode('utf-8', errors='replace')
+            else:
+                line = output
             error_output = process.stderr.readline()
 
+            if '\r' in line:
+                line = line.split('\r')[-1]
+                line = line.strip()
+
             # Analyze stdout for specific information
-            if output:
-                line = output.strip()
+            if line:
                 # Match counting objects
                 match = counting_objects_re.search(line)
                 if match:
@@ -452,7 +485,7 @@ def clone_repo(repo_url, repo_name, language, owner):
                 print(f"[stderr] {error_output.strip()}")
 
             # Break the loop if the process is finished and both stdout and stderr are done
-            if process.poll() is not None and not output and not error_output:
+            if process.poll() is not None and not line and not error_output:
                 break
 
         # Final exit code of the git clone process
@@ -486,10 +519,6 @@ def clone_repo(repo_url, repo_name, language, owner):
     if os.path.exists(f'{folder_name}/.git'):
         print(f"Attempting  to fix any problem on {repo_name}...")
         attempt_fix_repo()
-        # Pull latest changes and update submodules
-        print(f"Updating repository {repo_name}...")
-        attempt_update_repo()
-        print(f"Repository {repo_name} updated successfully.\n")
     
     # Move back to the original directory
     print(f"Returning to the parent directory.")
