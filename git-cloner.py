@@ -253,7 +253,7 @@ def check_for_wiki(repo_name, headers):
                 time.sleep(sleep_duration)
             else:
                 # Check if the repository has a wiki enabled
-                if repo_data.get("has_wiki", False):
+                if repo_data.get("has_wiki", True):
                     print(f"Wiki is enabled for {repo_name}.")
                     return True
                 else:
