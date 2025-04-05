@@ -22,6 +22,7 @@ parser = argparse.ArgumentParser(prog="git-archv",description="Fetch starred rep
 parser.add_argument('--token', type=str, help="GitHub token", required=False)
 parser.add_argument('--username', type=str, help="GitHub username", required=False)
 parser.add_argument('--apages', type=int, help="Number of API Pages", required=False)
+parser.add_argument('--depth', type=int, help="Clone depth", required=False)
 parser.add_argument('--errbreak', type=bool, help="Stop processing and break on ERROR", required=False, nargs='?', metavar='NONE')
 parser.add_argument('--errexit', type=bool, help="Stop processing and exit on ERROR", required=False, nargs='?', metavar='NONE')
 parser.add_argument('--verbose', type=bool, help="Verbose output", required=False, nargs='?', metavar='NONE')
@@ -52,7 +53,7 @@ Reqheaders = {
 }
 
 # Set the depth for shallow cloning (use None for full cloning)
-CLONE_DEPTH = 1  # Set this to None for full cloning
+CLONE_DEPTH = args.depth or  1  # Set this to None for full cloning
 
 #CACHE_DIR = 'cache'
 CLONED_REPOS_FILE = 'cloned_repos.json'
@@ -328,6 +329,19 @@ def clone_repo_with_wiki(repo_url, repo_name, language, owner):
         os.chdir(original_dir) 
 
 def clone_repo(repo_url, repo_name, language, owner):
+    # Directory for the language, default to "Unknown" if no language specified
+    if not language:
+        language = "Unknown"
+
+    # Create language directory if it doesn't exist
+    if not os.path.exists(f'{original_dir}/{language}'):
+        print(f"Creating directory: {language}")
+        os.makedirs(f'{original_dir}/{language}')
+    
+    # Change into the language directory
+    print(f"Changing to directory: {language}")
+    os.chdir(f'{original_dir}/{language}')
+
     # Set the folder name as "User@RepoName"
     folder_name = f"{owner}@{repo_name.split('/')[-1]}"
     repo_path = f"{original_dir}/{language}/{folder_name}"
@@ -345,23 +359,10 @@ def clone_repo(repo_url, repo_name, language, owner):
             os.chdir(original_dir)
         return
 
-    # Directory for the language, default to "Unknown" if no language specified
-    if not language:
-        language = "Unknown"
-    
-    # Create language directory if it doesn't exist
-    if not os.path.exists(f'{original_dir}/{language}'):
-        print(f"Creating directory: {language}")
-        os.makedirs(f'{original_dir}/{language}')
-    
-    # Change into the language directory
-    print(f"Changing to directory: {language}")
-    os.chdir(f'{original_dir}/{language}')
-    
     # Create the repository directory
-    if not os.path.exists(f'{original_dir}/{language}/{folder_name}'):
+    if not os.path.exists(repo_path):
         print(f"Creating repository directory: {folder_name}")
-        os.makedirs(f'{original_dir}/{language}/{folder_name}')
+        os.makedirs(repo_path)
     else:
         if os.path.exists(f'{folder_name}/.git'):
             print(f"Directory {folder_name} is already created earlier and is a Git Repository")
@@ -375,7 +376,7 @@ def clone_repo(repo_url, repo_name, language, owner):
             os.chdir(original_dir) 
 
     # Change into the repository directory
-    os.chdir(f'{original_dir}/{language}/{folder_name}')
+    os.chdir(repo_path)
     
     # Prepare the git clone command
     git_command = ['git', 'clone', '--progress', repo_url, '.']  # Clone directly into the current directory
@@ -493,7 +494,7 @@ def clone_repo(repo_url, repo_name, language, owner):
 
         """
         # Check the size of the shallow clone
-        repo_size_command = ['du', '-sh', f'{original_dir}/{language}/{folder_name}']
+        repo_size_command = ['du', '-sh', repo_path]
         size_process = subprocess.Popen(
             repo_size_command,	
             stdout=subprocess.PIPE,
